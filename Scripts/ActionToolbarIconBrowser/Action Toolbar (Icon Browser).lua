@@ -283,8 +283,6 @@ local function draw_menu(mx, my, lmb)
         if y + btn_h >= 0 and y <= visible_limit then
             if row.kind == "category" then
                 local btn = row.btn
-                local hover_w = 120
-                local hover = mx > x and mx < x + hover_w and my > y and my < y + btn_h
                 local active = (btn.category == active_category)
 
                 -- Adjust button width according to text
@@ -292,6 +290,8 @@ local function draw_menu(mx, my, lmb)
                 local padding = 20
                 local min_w = 120
                 local btn_w_dynamic = math.max(min_w, text_w + padding)
+
+                local hover = mx > x and mx < x + btn_w_dynamic and my > y and my < y + btn_h
 
                 -- Colors
                 if active then
