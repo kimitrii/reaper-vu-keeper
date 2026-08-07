@@ -1,13 +1,10 @@
 -- @description Action Toolbar (Icon Browser)
--- @version 1.0
+-- @version 2.0
 -- @author Kimitri
 
 local script_name = "Action Toolbar (Icon Browser)"
 local section = "ActionToolbarIconBrowserDockState"
 
-------------------------------------------------------------
--- Detect and toggle instance
-------------------------------------------------------------
 if reaper.JS_Window_Find then
     local hwnd = reaper.JS_Window_Find(script_name, true)
     if hwnd then
@@ -16,7 +13,6 @@ if reaper.JS_Window_Find then
     end
 end
 
---  Retrieve previous docking state
 local dock_state = tonumber(reaper.GetExtState(section, "dock_state")) or 0
 gfx.init(script_name, 600, 500, dock_state)
 
@@ -27,10 +23,6 @@ reaper.defer(function()
     end
 end)
 
-
-------------------------------------------------------------
--- Colors and fonts
-------------------------------------------------------------
 local theme_color = reaper.GetThemeColor("col_main_bg2", 0)
 if theme_color == -1 then theme_color = reaper.GetThemeColor("col_main_bg", 0) end
 
@@ -42,15 +34,12 @@ local function colorToRGB(color)
 end
 
 local bg_r, bg_g, bg_b = colorToRGB(theme_color)
-local bg_color_native = reaper.ColorToNative(bg_r * 255, bg_g * 255, bg_b * 255) 
+local bg_color_native = reaper.ColorToNative(bg_r * 255, bg_g * 255, bg_b * 255)
 
 gfx.setfont(1, "Arial", 16)
 local was_lmb = false
 local active_button = nil
 
-------------------------------------------------------------
--- Load buttons from .ini file
-------------------------------------------------------------
 local config_dir = reaper.GetResourcePath() .. "/scripts/ActionToolbarIconBrowser"
 local config_path = config_dir .. "/ActionToolbarIconBrowserConfig.ini"
 
@@ -70,7 +59,7 @@ local function parse_ini(path)
     local current_section
 
     for line in f:lines() do
-        line = line:match("^%s*(.-)%s*$") -- trim
+        line = line:match("^%s*(.-)%s*$")
         if line ~= "" and not line:match("^;") then
             local section = line:match("^%[(.-)%]$")
             if section then
@@ -111,8 +100,8 @@ local active_category = menu_buttons[1] and menu_buttons[1].category or nil
 local active_menu_index = 1
 local active_content_index = 0
 
-local content_x_start = 180 -- left edge of the content grid; sidebar rows must stay clear of this
-local content_y_start = 2 -- top margin of the content grid; must match draw_content's layout
+local content_x_start = 180
+local content_y_start = 2
 
 local function truncate_text(text, max_w)
     if gfx.measurestr(text) <= max_w then return text end
@@ -131,9 +120,6 @@ local function truncate_text(text, max_w)
     return text:sub(1, lo) .. ellipsis
 end
 
-------------------------------------------------------------
--- save data to /FXCustomBrowserConfig/FXBrowserConfig.ini
-------------------------------------------------------------
 local function save_to_ini(path, menu_buttons, content_buttons)
     local f = io.open(path, "w")
     if not f then return end
@@ -151,7 +137,7 @@ local function save_to_ini(path, menu_buttons, content_buttons)
     for cat, list in pairs(content_buttons) do
         f:write(("[" .. cat .. "]\n"))
         for _, fx in ipairs(list) do
-            local img = fx.image:match("([^/\\]+)$") or fx.image 
+            local img = fx.image:match("([^/\\]+)$") or fx.image
             f:write(("%s=%s,%s\n"):format(fx.name, fx.cmd, img))
         end
         f:write("\n")
@@ -159,13 +145,6 @@ local function save_to_ini(path, menu_buttons, content_buttons)
     f:close()
 end
 
-------------------------------------------------------------
--- Build the sidebar row list: each expanded category is followed
--- inline by its subcategories. Recurses, so nested subcategories
--- work the same way. The "add subcategory" control is drawn on the
--- right side of the category's own row (see draw_menu), not as a
--- separate row here - only the root "add category" row lives here.
-------------------------------------------------------------
 local function build_menu_rows()
     local rows = {}
     local function walk(parent_id, depth)
@@ -183,10 +162,6 @@ local function build_menu_rows()
     return rows
 end
 
--- build_menu_rows() allocates a fresh table (plus one per row) on every
--- call; since draw_menu() calls it every single frame, cache the result
--- and only rebuild when the tree actually changes (category added,
--- selected, expanded, or collapsed).
 local menu_rows_cache = nil
 local menu_rows_dirty = true
 
@@ -202,9 +177,6 @@ local function get_menu_rows()
     return menu_rows_cache
 end
 
-------------------------------------------------------------
--- load images with cache
-------------------------------------------------------------
 local next_image_id = 0
 local loaded_images = {}
 
@@ -223,9 +195,6 @@ local function load_image(path)
     return nil
 end
 
-------------------------------------------------------------
--- Track templates (buttons store "TEMPLATE:filename.RTrackTemplate" in cmd)
-------------------------------------------------------------
 local function list_track_templates()
     local files = {}
     local i = 0
@@ -244,9 +213,6 @@ local function insert_track_template(template_file)
     reaper.Main_openProject(track_templates_path .. template_file)
 end
 
-------------------------------------------------------------
--- Run content button actions
-------------------------------------------------------------
 local function run_action(cmd_id)
     local template_file = cmd_id:match("^TEMPLATE:(.+)$")
     if template_file then
@@ -262,16 +228,13 @@ local function run_action(cmd_id)
     end
 end
 
-------------------------------------------------------------
--- Draw sidebar menu
-------------------------------------------------------------
 local menu_scroll_y = 0
 local menu_max_scroll = 0
 local scroll_y = 0
 local max_scroll = 0
-local menu_focus_add = false -- true when up/down navigation has reached the trailing "add category" row
-local menu_focus_subadd = false -- true when right-arrow navigation has reached the active category's inline "add subcategory" button
-local content_focus_add = false -- true when left/right navigation has reached the trailing "add action" button
+local menu_focus_add = false
+local menu_focus_subadd = false
+local content_focus_add = false
 
 local function active_category_expanded()
     for _, b in ipairs(menu_buttons) do
@@ -289,10 +252,6 @@ local function collapse_subtree(category)
     end
 end
 
--- Selects btn as the active category and expands its subcategories,
--- closing sibling categories at the same level so only one stays open.
--- force_open makes it always end up expanded (used for arrow-key nav);
--- otherwise a click on an already-open category closes it (toggle).
 local function select_category(btn, force_open)
     menu_focus_add = false
     menu_focus_subadd = false
@@ -327,14 +286,10 @@ end
 local function draw_menu(mx, my, lmb)
     local x_base, indent_w, btn_h, spacing = 0, 20, 35, 10
     local plus_w, plus_gap = 30, 8
-    local plus_reserve = plus_w + plus_gap -- left column reserved for a category's inline "+"
+    local plus_reserve = plus_w + plus_gap
     local y = 0 - menu_scroll_y
     local visible_limit = gfx.h + 50
 
-    -- Deeply nested subcategories must not indent into the content grid.
-    -- Clamp how far indentation can push a row right, and separately
-    -- clamp/truncate the button itself, so nesting compresses within the
-    -- sidebar instead of encroaching on content_x_start.
     local sidebar_right_gap = 12
     local min_readable_w = 50
     local sidebar_right_limit = content_x_start - sidebar_right_gap
@@ -343,9 +298,6 @@ local function draw_menu(mx, my, lmb)
     local rows = get_menu_rows()
 
     for _, row in ipairs(rows) do
-        -- x is the row's indent anchor (also the inline "+" position);
-        -- the category button itself sits to the right, past the
-        -- reserved "+" column, so top-level rows still have room for it.
         local depth = math.min(row.depth, max_depth)
         local x = x_base + depth * indent_w
         local box_x = x + plus_reserve
@@ -353,15 +305,8 @@ local function draw_menu(mx, my, lmb)
         if y + btn_h >= 0 and y <= visible_limit then
             if row.kind == "category" then
                 local btn = row.btn
-                -- While keyboard focus has moved onto the trailing "add" row
-                -- or this category's own inline "+", the category itself is
-                -- no longer the focused element, so don't paint it as
-                -- selected too.
                 local active = (btn.category == active_category) and not menu_focus_add and not menu_focus_subadd
 
-                -- Adjust button width according to text, but never past
-                -- the content grid's left edge - truncate the name with
-                -- an ellipsis if it doesn't fit in what's left.
                 local text_w, text_h = gfx.measurestr(btn.name)
                 local padding = 20
                 local min_w = 120
@@ -374,11 +319,6 @@ local function draw_menu(mx, my, lmb)
 
                 local hover = mx > box_x and mx < box_x + btn_w_dynamic and my > y and my < y + btn_h
 
-                -- Colors. While browsing the action-button grid, the active
-                -- category shows a bright, fully-opaque blue so it's clear
-                -- which category the items being navigated belong to;
-                -- otherwise it's a duller, muted blue as a quieter
-                -- "currently selected" cue.
                 if active then
                     local browsing_content = active_content_index > 0 or content_focus_add
                     if browsing_content then
@@ -392,21 +332,13 @@ local function draw_menu(mx, my, lmb)
                     gfx.set(0.35, 0.35, 0.35)
                 end
 
-                -- Draw button with adjusted width
                 gfx.roundrect(box_x, y, btn_w_dynamic, btn_h, 6, 1)
 
-                -- Vertically centered text
                 gfx.x = box_x + 10
                 gfx.y = y + (btn_h - text_h) / 2
                 gfx.set(1, 1, 1)
                 gfx.drawstr(display_name)
 
-                -- "add subcategory" control, to the left of the category
-                -- button. Only drawn for the active category itself - an
-                -- expanded ancestor on the path down to it doesn't show
-                -- its own, since it isn't the current selection. Also
-                -- hidden once keyboard focus has moved past the category
-                -- list onto the trailing "add category" row.
                 if btn.expanded and btn.category == active_category and not menu_focus_add then
                     local plus_x = x
                     local plus_hover = mx > plus_x and mx < plus_x + plus_w and my > y and my < y + btn_h
@@ -425,15 +357,10 @@ local function draw_menu(mx, my, lmb)
                     end
                 end
 
-                -- Click: select category (shows its content) and toggle its subcategories
                 if hover and lmb and not was_lmb then
                     select_category(btn)
                 end
             else
-                -- root "add category" row (the only remaining row of this kind).
-                -- Aligned with the category buttons' own column (box_x), not
-                -- the reserved inline-"+" column, since it isn't scoped to
-                -- any particular category.
                 local hover = mx > box_x and mx < box_x + 50 and my > y and my < y + btn_h
                 if menu_focus_add then
                     gfx.set(0.2, 0.6, 1.0)
@@ -453,10 +380,6 @@ local function draw_menu(mx, my, lmb)
         y = y + btn_h + spacing
     end
 
-    -- Keep active_menu_index in sync with the currently selected category
-    -- (indexes the category-only list, matching the arrow-key handlers).
-    -- Skipped while focus sits on the trailing "add" row, since that row
-    -- isn't a category and would have nothing to sync against.
     if not menu_focus_add then
         local cat_i = 0
         for _, row in ipairs(rows) do
@@ -473,10 +396,6 @@ local function draw_menu(mx, my, lmb)
     menu_max_scroll = math.max(0, (#rows * (btn_h + spacing)) - gfx.h + 90)
 end
 
-------------------------------------------------------------
--- Add a new action/track-template button to the active category.
--- Shared by the content pane's mouse click and its keyboard Enter.
-------------------------------------------------------------
 local function add_content_button()
     if not active_category then
         reaper.ShowMessageBox("No active category.", "Warning", 0)
@@ -516,10 +435,6 @@ local function add_content_button()
     end
 end
 
-------------------------------------------------------------
--- Draw content with scroll (optimized)
-------------------------------------------------------------
-
 local function draw_content(mx, my, lmb)
     local x_start = content_x_start
     local y_start = content_y_start - scroll_y
@@ -532,11 +447,6 @@ local function draw_content(mx, my, lmb)
     local total_height = 0
     local visible_limit = gfx.h + 150
 
-    ------------------------------------------------------------
-    -- Draw content, accumulating total_height (for scroll clamping)
-    -- in the same pass instead of a separate pre-calculation loop
-    -- over the same list.
-    ------------------------------------------------------------
     for i, btn in ipairs(list) do
         local img_data = loaded_images[btn.image]
         if not img_data then load_image(btn.image) img_data = loaded_images[btn.image] end
@@ -561,8 +471,7 @@ local function draw_content(mx, my, lmb)
                     hovered_icon_name = btn.name
                 end
 
-                -- Keyboard selected icon
-                local selected = (i == active_content_index) 
+                local selected = (i == active_content_index)
 
                 local active = (active_button == btn)
                 local src_x = active and frame_w * 2 or (hover and frame_w or 0)
@@ -570,7 +479,7 @@ local function draw_content(mx, my, lmb)
                 gfx.blit(img_id, 1, 0, src_x, 0, frame_w, frame_h, x, y + offset_y, frame_w, frame_h)
 
                 if selected then
-                    gfx.set(0.2, 0.6, 1.0, 1) 
+                    gfx.set(0.2, 0.6, 1.0, 1)
                     gfx.rect(x - 2, y + offset_y - 2, frame_w + 4, frame_h + 4, false)
                 end
 
@@ -589,9 +498,6 @@ local function draw_content(mx, my, lmb)
 
     y = y + line_height + spacing_y
 
-    ------------------------------------------------------------
-    -- Add button (fixed after everything)
-    ------------------------------------------------------------
     local hover = mx > x_start and mx < x_start + 50 and my > y and my < y + 30
     if content_focus_add then
         gfx.set(0.2, 0.6, 1.0)
@@ -617,18 +523,9 @@ local function draw_content(mx, my, lmb)
     end
     hovered_icon_name = nil
 
-
-    ------------------------------------------------------------
-    -- max scroll based on total height
-    ------------------------------------------------------------
     max_scroll = math.max(0, total_height - (gfx.h - 50))
 end
 
-------------------------------------------------------------
--- Up/down arrow-key navigation of the sidebar: steps through the
--- category list, ending on the trailing "add category" row, which
--- is treated as if it were simply the last item of that list.
-------------------------------------------------------------
 local function navigate_menu(delta)
     local rows = get_menu_rows()
     if #rows == 0 then return end
@@ -654,11 +551,6 @@ local function navigate_menu(delta)
     menu_scroll_y = math.max(0, math.min(menu_scroll_y, menu_max_scroll))
 end
 
-------------------------------------------------------------
--- Scrolls the content pane so the item at `index` in `list` is
--- visible. Shared by left/right content navigation and by the
--- sidebar -> content focus transition.
-------------------------------------------------------------
 local function reveal_content_item(list, index)
     if index <= 0 then return end
     local img_data = loaded_images[list[index].image]
@@ -695,25 +587,20 @@ local function reveal_content_item(list, index)
     scroll_y = math.max(0, math.min(scroll_y, max_scroll))
 end
 
-------------------------------------------------------------
 function main()
     gfx.clear = bg_color_native
     local mx, my = gfx.mouse_x, gfx.mouse_y
     local lmb = gfx.mouse_cap & 1 == 1
 
-    -- Independent scroll for menu and content
     local mw = gfx.mouse_wheel
     if mw ~= 0 then
         if mx < 160 then
-            -- Scroll in menu (left side)
             menu_scroll_y = math.max(0, math.min(menu_scroll_y - mw / 120 * 30, menu_max_scroll))
         else
-            -- Scroll in content
             scroll_y = math.max(0, math.min(scroll_y - mw / 120 * 30, max_scroll))
         end
     end
     gfx.mouse_wheel = 0
-
 
     draw_menu(mx, my, lmb)
     draw_content(mx, my, lmb)
@@ -727,9 +614,6 @@ function main()
 
     local char = gfx.getchar()
 
--- If ESC is pressed, exit the script. While focus is on the category or
--- subcategory "+" button, ESC closes the window directly rather than
--- stepping back to the category selection.
     if char == 27 then
         if menu_focus_add or menu_focus_subadd then
             gfx.quit()
@@ -744,29 +628,14 @@ function main()
         end
     end
 
-    ------------------------------------------------------------
-    -- ↑ up arrow = previous menu
-    ------------------------------------------------------------
     if char == 30064 then
         navigate_menu(-1)
     end
 
-    ------------------------------------------------------------
-    -- ↓ down arrow = next menu
-    ------------------------------------------------------------
     if char == 1685026670 then
         navigate_menu(1)
     end
 
-    ------------------------------------------------------------
-    -- ← Left arrow = the "+" sits to the left of the category now, so
-    -- Left reaches it: from nothing selected, if the active category
-    -- is expanded, Left focuses its inline "+" (add subcategory);
-    -- from there, nothing further left. Otherwise Left steps backward
-    -- through content items (and back from the trailing "add action").
-    -- Disabled while focus is on the root "add category" row, since
-    -- that row isn't a category and has no content/subadd of its own.
-    ------------------------------------------------------------
     if char == 1818584692 and not menu_focus_add then
         local list = content_buttons[active_category] or {}
         if content_focus_add then
@@ -781,18 +650,11 @@ function main()
         end
     end
 
-    ------------------------------------------------------------
-    -- → Right arrow = steps out of the inline "+" back to the category,
-    -- then forward through content items; past the last one, lands on
-    -- the trailing "add action" button. Disabled while focus is on the
-    -- root "add category" row, for the same reason as Left above.
-    ------------------------------------------------------------
     if char == 1919379572 and not menu_focus_add then
         local list = content_buttons[active_category] or {}
         if menu_focus_subadd then
             menu_focus_subadd = false
         elseif content_focus_add then
-            -- already on the trailing "add" button, nothing further right
         elseif active_content_index >= #list then
             content_focus_add = true
             active_content_index = 0
@@ -802,9 +664,6 @@ function main()
         end
     end
 
-    ------------------------------------------------------------
-    -- Enter = executar ação do item ativo
-    ------------------------------------------------------------
     if char == 13 then
         if menu_focus_add then
             add_subcategory(nil)
@@ -826,7 +685,6 @@ function main()
     else
         gfx.quit()
     end
-
 end
 
 reaper.atexit(function()
