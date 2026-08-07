@@ -284,14 +284,20 @@ local function add_subcategory(parent_category)
 end
 
 local function draw_menu(mx, my, lmb)
-    local x_base, indent_w, btn_h, spacing = 20, 20, 35, 10
-    local y = 40 - menu_scroll_y
+    local x_base, indent_w, btn_h, spacing = 0, 20, 35, 10
+    local plus_w, plus_gap = 30, 8
+    local plus_reserve = plus_w + plus_gap -- left column reserved for a category's inline "+"
+    local y = 0 - menu_scroll_y
     local visible_limit = gfx.h + 50
 
     local rows = build_menu_rows()
 
     for _, row in ipairs(rows) do
+        -- x is the row's indent anchor (also the inline "+" position);
+        -- the category button itself sits to the right, past the
+        -- reserved "+" column, so top-level rows still have room for it.
         local x = x_base + row.depth * indent_w
+        local box_x = x + plus_reserve
 
         if y + btn_h >= 0 and y <= visible_limit then
             if row.kind == "category" then
@@ -308,7 +314,7 @@ local function draw_menu(mx, my, lmb)
                 local min_w = 120
                 local btn_w_dynamic = math.max(min_w, text_w + padding)
 
-                local hover = mx > x and mx < x + btn_w_dynamic and my > y and my < y + btn_h
+                local hover = mx > box_x and mx < box_x + btn_w_dynamic and my > y and my < y + btn_h
 
                 -- Colors
                 if active then
@@ -320,21 +326,24 @@ local function draw_menu(mx, my, lmb)
                 end
 
                 -- Draw button with adjusted width
-                gfx.roundrect(x, y, btn_w_dynamic, btn_h, 6, 1)
+                gfx.roundrect(box_x, y, btn_w_dynamic, btn_h, 6, 1)
 
                 -- Vertically centered text
-                gfx.x = x + 10
+                gfx.x = box_x + 10
                 gfx.y = y + (btn_h - text_h) / 2
                 gfx.set(1, 1, 1)
                 gfx.drawstr(btn.name)
 
-                -- "add subcategory" control, inline on the right side of this row
-                -- (only while this category is expanded, scoped to it)
-                if btn.expanded then
-                    local plus_x, plus_w = x + btn_w_dynamic + 8, 30
+                -- "add subcategory" control, to the left of the category
+                -- button. Only drawn for the active category itself - an
+                -- expanded ancestor on the path down to it doesn't show
+                -- its own, since it isn't the current selection. Also
+                -- hidden once keyboard focus has moved past the category
+                -- list onto the trailing "add category" row.
+                if btn.expanded and btn.category == active_category and not menu_focus_add then
+                    local plus_x = x
                     local plus_hover = mx > plus_x and mx < plus_x + plus_w and my > y and my < y + btn_h
-                    local plus_focused = menu_focus_subadd and btn.category == active_category
-                    if plus_focused then
+                    if menu_focus_subadd then
                         gfx.set(0.2, 0.6, 1.0)
                     else
                         gfx.set(plus_hover and 0.4 or 0.3, plus_hover and 0.5 or 0.3, plus_hover and 0.6 or 0.3)
@@ -354,15 +363,18 @@ local function draw_menu(mx, my, lmb)
                     select_category(btn)
                 end
             else
-                -- root "add category" row (the only remaining row of this kind)
-                local hover = mx > x and mx < x + 50 and my > y and my < y + btn_h
+                -- root "add category" row (the only remaining row of this kind).
+                -- Aligned with the category buttons' own column (box_x), not
+                -- the reserved inline-"+" column, since it isn't scoped to
+                -- any particular category.
+                local hover = mx > box_x and mx < box_x + 50 and my > y and my < y + btn_h
                 if menu_focus_add then
                     gfx.set(0.2, 0.6, 1.0)
                 else
                     gfx.set(hover and 0.4 or 0.3, hover and 0.5 or 0.3, hover and 0.6 or 0.3)
                 end
-                gfx.roundrect(x, y, 50, btn_h, 6, 1)
-                gfx.x, gfx.y = x + 20, y + 8
+                gfx.roundrect(box_x, y, 50, btn_h, 6, 1)
+                gfx.x, gfx.y = box_x + 20, y + 8
                 gfx.set(1, 1, 1)
                 gfx.drawstr("+")
 
@@ -443,7 +455,7 @@ end
 
 local function draw_content(mx, my, lmb)
     local x_start = 180
-    local y_start = 40 - scroll_y
+    local y_start = 0 - scroll_y
     local spacing_x, spacing_y = 20, 20
     local list = content_buttons[active_category] or {}
 
@@ -695,47 +707,40 @@ function main()
     end
 
     ------------------------------------------------------------
-    -- ← Left arrow = previous content item. From item 1, steps back
-    -- onto the active category's inline "+" (if it's expanded); from
-    -- there, or from item 1 with no inline "+", nothing further left.
-    -- From the trailing "add action" button, steps back onto the
-    -- last content item (or does nothing if the list is empty).
+    -- ← Left arrow = the "+" sits to the left of the category now, so
+    -- Left reaches it: from nothing selected, if the active category
+    -- is expanded, Left focuses its inline "+" (add subcategory);
+    -- from there, nothing further left. Otherwise Left steps backward
+    -- through content items (and back from the trailing "add action").
+    -- Disabled while focus is on the root "add category" row, since
+    -- that row isn't a category and has no content/subadd of its own.
     ------------------------------------------------------------
-    if char == 1818584692 then
+    if char == 1818584692 and not menu_focus_add then
         local list = content_buttons[active_category] or {}
         if content_focus_add then
             content_focus_add = false
             active_content_index = #list
             reveal_content_item(list, active_content_index)
-        elseif active_content_index > 1 then
+        elseif active_content_index > 0 then
             active_content_index = active_content_index - 1
             reveal_content_item(list, active_content_index)
-        elseif active_content_index == 1 then
-            active_content_index = 0
-            if active_category_expanded() then
-                menu_focus_subadd = true
-            end
-        elseif menu_focus_subadd then
-            menu_focus_subadd = false
+        elseif not menu_focus_subadd and active_category_expanded() then
+            menu_focus_subadd = true
         end
     end
 
     ------------------------------------------------------------
-    -- → Right arrow = next content item. From nothing selected, if the
-    -- active category is expanded, first stops on its inline "+" (add
-    -- subcategory) before entering the content list. Past the last
-    -- item, lands on the trailing "add action" button.
+    -- → Right arrow = steps out of the inline "+" back to the category,
+    -- then forward through content items; past the last one, lands on
+    -- the trailing "add action" button. Disabled while focus is on the
+    -- root "add category" row, for the same reason as Left above.
     ------------------------------------------------------------
-    if char == 1919379572 then
+    if char == 1919379572 and not menu_focus_add then
         local list = content_buttons[active_category] or {}
         if menu_focus_subadd then
             menu_focus_subadd = false
-            active_content_index = #list > 0 and 1 or 0
-            reveal_content_item(list, active_content_index)
         elseif content_focus_add then
             -- already on the trailing "add" button, nothing further right
-        elseif active_content_index == 0 and active_category_expanded() then
-            menu_focus_subadd = true
         elseif active_content_index >= #list then
             content_focus_add = true
             active_content_index = 0
