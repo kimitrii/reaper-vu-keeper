@@ -183,6 +183,25 @@ local function build_menu_rows()
     return rows
 end
 
+-- build_menu_rows() allocates a fresh table (plus one per row) on every
+-- call; since draw_menu() calls it every single frame, cache the result
+-- and only rebuild when the tree actually changes (category added,
+-- selected, expanded, or collapsed).
+local menu_rows_cache = nil
+local menu_rows_dirty = true
+
+local function invalidate_menu_rows()
+    menu_rows_dirty = true
+end
+
+local function get_menu_rows()
+    if menu_rows_dirty then
+        menu_rows_cache = build_menu_rows()
+        menu_rows_dirty = false
+    end
+    return menu_rows_cache
+end
+
 ------------------------------------------------------------
 -- load images with cache
 ------------------------------------------------------------
@@ -291,11 +310,13 @@ local function select_category(btn, force_open)
         end
     end
     btn.expanded = force_open or (not was_expanded)
+    invalidate_menu_rows()
 end
 
 local function add_subcategory(parent_category)
     local ok, name = reaper.GetUserInputs("New Subcategory", 1, "Display name:", "")
     if not ok or name == "" then return end
+    invalidate_menu_rows()
 
     local category = name:lower():gsub("[^%w]+", "_") .. "_" .. tostring(#menu_buttons + 1)
     table.insert(menu_buttons, { name = name, category = category, parent = parent_category })
@@ -319,7 +340,7 @@ local function draw_menu(mx, my, lmb)
     local sidebar_right_limit = content_x_start - sidebar_right_gap
     local max_depth = math.max(0, math.floor((sidebar_right_limit - min_readable_w - x_base - plus_reserve) / indent_w))
 
-    local rows = build_menu_rows()
+    local rows = get_menu_rows()
 
     for _, row in ipairs(rows) do
         -- x is the row's indent anchor (also the inline "+" position);
@@ -508,41 +529,24 @@ local function draw_content(mx, my, lmb)
     local x = x_start
     local y = y_start
     local line_height = 0
-    local available_width = gfx.w - x_start - 20
+    local total_height = 0
     local visible_limit = gfx.h + 150
 
     ------------------------------------------------------------
-    -- Pre-calculate total height (without drawing)
-    ------------------------------------------------------------
-    local total_height = 0
-    local temp_x, temp_line_height = 0, 0
-
-    for _, btn in ipairs(list) do
-        local img_data = loaded_images[btn.image]
-        if not img_data then load_image(btn.image) img_data = loaded_images[btn.image] end
-        if img_data then
-            local iw, ih = img_data.w / 3, img_data.h
-            if temp_x + iw > available_width then
-                total_height = total_height + temp_line_height + spacing_y
-                temp_x, temp_line_height = 0, 0
-            end
-            temp_x = temp_x + iw + spacing_x
-            temp_line_height = math.max(temp_line_height, ih)
-        end
-    end
-    total_height = total_height + temp_line_height + spacing_y + 30  
-
-    ------------------------------------------------------------
-    --  Draw content
+    -- Draw content, accumulating total_height (for scroll clamping)
+    -- in the same pass instead of a separate pre-calculation loop
+    -- over the same list.
     ------------------------------------------------------------
     for i, btn in ipairs(list) do
         local img_data = loaded_images[btn.image]
+        if not img_data then load_image(btn.image) img_data = loaded_images[btn.image] end
         if img_data then
             local img_id, iw, ih = img_data.id, img_data.w / 3, img_data.h
             local frame_w, frame_h = iw, ih
 
             if x + frame_w > gfx.w - 20 then
                 x = x_start
+                total_height = total_height + line_height + spacing_y
                 y = y + line_height + spacing_y
                 line_height = 0
             end
@@ -581,6 +585,7 @@ local function draw_content(mx, my, lmb)
             x = x + frame_w + spacing_x
         end
     end
+    total_height = total_height + line_height + spacing_y + 30
 
     y = y + line_height + spacing_y
 
@@ -625,7 +630,7 @@ end
 -- is treated as if it were simply the last item of that list.
 ------------------------------------------------------------
 local function navigate_menu(delta)
-    local rows = build_menu_rows()
+    local rows = get_menu_rows()
     if #rows == 0 then return end
 
     active_menu_index = math.max(1, math.min(active_menu_index + delta, #rows))
