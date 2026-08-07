@@ -111,6 +111,26 @@ local active_category = menu_buttons[1] and menu_buttons[1].category or nil
 local active_menu_index = 1
 local active_content_index = 0
 
+local content_x_start = 180 -- left edge of the content grid; sidebar rows must stay clear of this
+local content_y_start = 2 -- top margin of the content grid; must match draw_content's layout
+
+local function truncate_text(text, max_w)
+    if gfx.measurestr(text) <= max_w then return text end
+    local ellipsis = "..."
+    if gfx.measurestr(ellipsis) >= max_w then return ellipsis end
+
+    local lo, hi = 0, #text
+    while lo < hi do
+        local mid = math.ceil((lo + hi + 1) / 2)
+        if gfx.measurestr(text:sub(1, mid) .. ellipsis) <= max_w then
+            lo = mid
+        else
+            hi = mid - 1
+        end
+    end
+    return text:sub(1, lo) .. ellipsis
+end
+
 ------------------------------------------------------------
 -- save data to /FXCustomBrowserConfig/FXBrowserConfig.ini
 ------------------------------------------------------------
@@ -290,13 +310,23 @@ local function draw_menu(mx, my, lmb)
     local y = 0 - menu_scroll_y
     local visible_limit = gfx.h + 50
 
+    -- Deeply nested subcategories must not indent into the content grid.
+    -- Clamp how far indentation can push a row right, and separately
+    -- clamp/truncate the button itself, so nesting compresses within the
+    -- sidebar instead of encroaching on content_x_start.
+    local sidebar_right_gap = 12
+    local min_readable_w = 50
+    local sidebar_right_limit = content_x_start - sidebar_right_gap
+    local max_depth = math.max(0, math.floor((sidebar_right_limit - min_readable_w - x_base - plus_reserve) / indent_w))
+
     local rows = build_menu_rows()
 
     for _, row in ipairs(rows) do
         -- x is the row's indent anchor (also the inline "+" position);
         -- the category button itself sits to the right, past the
         -- reserved "+" column, so top-level rows still have room for it.
-        local x = x_base + row.depth * indent_w
+        local depth = math.min(row.depth, max_depth)
+        local x = x_base + depth * indent_w
         local box_x = x + plus_reserve
 
         if y + btn_h >= 0 and y <= visible_limit then
@@ -308,11 +338,18 @@ local function draw_menu(mx, my, lmb)
                 -- selected too.
                 local active = (btn.category == active_category) and not menu_focus_add and not menu_focus_subadd
 
-                -- Adjust button width according to text
+                -- Adjust button width according to text, but never past
+                -- the content grid's left edge - truncate the name with
+                -- an ellipsis if it doesn't fit in what's left.
                 local text_w, text_h = gfx.measurestr(btn.name)
                 local padding = 20
                 local min_w = 120
-                local btn_w_dynamic = math.max(min_w, text_w + padding)
+                local available_w = math.max(min_readable_w, sidebar_right_limit - box_x)
+                local btn_w_dynamic = math.min(math.max(min_w, text_w + padding), available_w)
+                local display_name = btn.name
+                if text_w + padding > btn_w_dynamic then
+                    display_name = truncate_text(btn.name, btn_w_dynamic - padding)
+                end
 
                 local hover = mx > box_x and mx < box_x + btn_w_dynamic and my > y and my < y + btn_h
 
@@ -341,7 +378,7 @@ local function draw_menu(mx, my, lmb)
                 gfx.x = box_x + 10
                 gfx.y = y + (btn_h - text_h) / 2
                 gfx.set(1, 1, 1)
-                gfx.drawstr(btn.name)
+                gfx.drawstr(display_name)
 
                 -- "add subcategory" control, to the left of the category
                 -- button. Only drawn for the active category itself - an
@@ -463,8 +500,8 @@ end
 ------------------------------------------------------------
 
 local function draw_content(mx, my, lmb)
-    local x_start = 180
-    local y_start = 2 - scroll_y
+    local x_start = content_x_start
+    local y_start = content_y_start - scroll_y
     local spacing_x, spacing_y = 20, 20
     local list = content_buttons[active_category] or {}
 
@@ -624,7 +661,7 @@ local function reveal_content_item(list, index)
 
     local ih = img_data.h
     local spacing_x, spacing_y = 20, 20
-    local x_start, y_start = 180, 40
+    local x_start, y_start = content_x_start, content_y_start
 
     local x, y = x_start, y_start
     for i = 1, index - 1 do
