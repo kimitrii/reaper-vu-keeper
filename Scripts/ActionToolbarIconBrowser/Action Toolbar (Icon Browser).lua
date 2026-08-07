@@ -316,9 +316,18 @@ local function draw_menu(mx, my, lmb)
 
                 local hover = mx > box_x and mx < box_x + btn_w_dynamic and my > y and my < y + btn_h
 
-                -- Colors
+                -- Colors. While browsing the action-button grid, the active
+                -- category shows a bright, fully-opaque blue so it's clear
+                -- which category the items being navigated belong to;
+                -- otherwise it's a duller, muted blue as a quieter
+                -- "currently selected" cue.
                 if active then
-                    gfx.set(0.2, 0.6, 1.0)
+                    local browsing_content = active_content_index > 0 or content_focus_add
+                    if browsing_content then
+                        gfx.set(0.13, 0.32, 0.8, 1)
+                    else
+                        gfx.set(0.2, 0.6, 1.0, 1)
+                    end
                 elseif hover then
                     gfx.set(0.45, 0.45, 0.55)
                 else
@@ -455,7 +464,7 @@ end
 
 local function draw_content(mx, my, lmb)
     local x_start = 180
-    local y_start = 0 - scroll_y
+    local y_start = 2 - scroll_y
     local spacing_x, spacing_y = 20, 20
     local list = content_buttons[active_category] or {}
 
@@ -676,16 +685,17 @@ function main()
 
     local char = gfx.getchar()
 
--- If ESC is pressed, exit the script (or step focus back first)
+-- If ESC is pressed, exit the script. While focus is on the category or
+-- subcategory "+" button, ESC closes the window directly rather than
+-- stepping back to the category selection.
     if char == 27 then
-        if content_focus_add then
+        if menu_focus_add or menu_focus_subadd then
+            gfx.quit()
+            return
+        elseif content_focus_add then
             content_focus_add = false
-        elseif menu_focus_subadd then
-            menu_focus_subadd = false
         elseif active_content_index ~= 0 then
             active_content_index = 0
-        elseif menu_focus_add then
-            menu_focus_add = false
         else
             gfx.quit()
             return
