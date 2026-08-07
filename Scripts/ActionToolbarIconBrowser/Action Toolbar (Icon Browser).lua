@@ -59,6 +59,7 @@ if not reaper.file_exists(config_dir) then
 end
 
 local icon_path = reaper.GetResourcePath() .. "/Data/toolbar_icons/"
+local track_templates_path = reaper.GetResourcePath() .. "/TrackTemplates/"
 
 local function parse_ini(path)
     local f = io.open(path, "r")
@@ -84,7 +85,9 @@ local function parse_ini(path)
                     value = value:match("^%s*(.-)%s*$")
 
                     if current_section == "Menu" then
-                        table.insert(menu_buttons, { name = key, category = value })
+                        local category, parent = value:match("^(.-):(.+)$")
+                        if not category then category = value end
+                        table.insert(menu_buttons, { name = key, category = category, parent = parent })
                     else
                         local cmd, img = value:match("([^,]+),%s*(.+)")
                         table.insert(content_buttons[current_section], {
@@ -117,7 +120,11 @@ local function save_to_ini(path, menu_buttons, content_buttons)
 
     f:write("[Menu]\n")
     for _, btn in ipairs(menu_buttons) do
-        f:write(("%s=%s\n"):format(btn.name, btn.category))
+        if btn.parent then
+            f:write(("%s=%s:%s\n"):format(btn.name, btn.category, btn.parent))
+        else
+            f:write(("%s=%s\n"):format(btn.name, btn.category))
+        end
     end
     f:write("\n")
 
@@ -130,6 +137,30 @@ local function save_to_ini(path, menu_buttons, content_buttons)
         f:write("\n")
     end
     f:close()
+end
+
+------------------------------------------------------------
+-- Build the sidebar row list: each expanded category is followed
+-- inline by its subcategories. Recurses, so nested subcategories
+-- work the same way. The "add subcategory" control is drawn on the
+-- right side of the category's own row (see draw_menu), not as a
+-- separate row here - only the root "add category" row lives here.
+------------------------------------------------------------
+local function build_menu_rows()
+    local rows = {}
+    local function walk(parent_id, depth)
+        for _, btn in ipairs(menu_buttons) do
+            if btn.parent == parent_id then
+                table.insert(rows, { kind = "category", btn = btn, depth = depth })
+                if btn.expanded then
+                    walk(btn.category, depth + 1)
+                end
+            end
+        end
+    end
+    walk(nil, 0)
+    table.insert(rows, { kind = "add", parent = nil, depth = 0 })
+    return rows
 end
 
 ------------------------------------------------------------
@@ -154,9 +185,36 @@ local function load_image(path)
 end
 
 ------------------------------------------------------------
+-- Track templates (buttons store "TEMPLATE:filename.RTrackTemplate" in cmd)
+------------------------------------------------------------
+local function list_track_templates()
+    local files = {}
+    local i = 0
+    while true do
+        local fn = reaper.EnumerateFiles(track_templates_path, i)
+        if not fn then break end
+        if fn:match("%.RTrackTemplate$") then table.insert(files, fn) end
+        i = i + 1
+    end
+    return files
+end
+
+local function insert_track_template(template_file)
+    local tr = reaper.GetTrack(0, reaper.CountTracks(0) - 1)
+    if tr then reaper.SetOnlyTrackSelected(tr) end
+    reaper.Main_openProject(track_templates_path .. template_file)
+end
+
+------------------------------------------------------------
 -- Run content button actions
 ------------------------------------------------------------
 local function run_action(cmd_id)
+    local template_file = cmd_id:match("^TEMPLATE:(.+)$")
+    if template_file then
+        insert_track_template(template_file)
+        return
+    end
+
     local command = reaper.NamedCommandLookup(cmd_id)
     if command and command ~= 0 then
         reaper.Main_OnCommand(command, 0)
@@ -173,92 +231,137 @@ local menu_max_scroll = 0
 local scroll_y = 0
 local max_scroll = 0
 
+local function collapse_subtree(category)
+    for _, b in ipairs(menu_buttons) do
+        if b.parent == category then
+            b.expanded = false
+            collapse_subtree(b.category)
+        end
+    end
+end
+
+-- Selects btn as the active category and expands its subcategories,
+-- closing sibling categories at the same level so only one stays open.
+-- force_open makes it always end up expanded (used for arrow-key nav);
+-- otherwise a click on an already-open category closes it (toggle).
+local function select_category(btn, force_open)
+    if active_category ~= btn.category then
+        active_category = btn.category
+        scroll_y = 0
+        active_content_index = 0
+    end
+    local was_expanded = btn.expanded
+    for _, sib in ipairs(menu_buttons) do
+        if sib.parent == btn.parent then
+            sib.expanded = false
+            collapse_subtree(sib.category)
+        end
+    end
+    btn.expanded = force_open or (not was_expanded)
+end
+
+local function add_subcategory(parent_category)
+    local ok, name = reaper.GetUserInputs("New Subcategory", 1, "Display name:", "")
+    if not ok or name == "" then return end
+
+    local category = name:lower():gsub("[^%w]+", "_") .. "_" .. tostring(#menu_buttons + 1)
+    table.insert(menu_buttons, { name = name, category = category, parent = parent_category })
+    content_buttons[category] = {}
+    save_to_ini(config_path, menu_buttons, content_buttons)
+end
+
 local function draw_menu(mx, my, lmb)
-    local x, y = 20, 40 - menu_scroll_y
-    local btn_w, btn_h = 120, 35
+    local x_base, indent_w, btn_h, spacing = 20, 20, 35, 10
+    local y = 40 - menu_scroll_y
     local visible_limit = gfx.h + 50
 
-    
+    local rows = build_menu_rows()
 
-    ------------------------------------------------------------
-    -- Then draw the normal menu buttons (as before)
-    ------------------------------------------------------------
-    for i, btn in ipairs(menu_buttons) do
+    for _, row in ipairs(rows) do
+        local x = x_base + row.depth * indent_w
+
         if y + btn_h >= 0 and y <= visible_limit then
-            local hover = mx > x and mx < x + btn_w and my > y and my < y + btn_h
-            local active = (btn.category == active_category)
+            if row.kind == "category" then
+                local btn = row.btn
+                local hover_w = 120
+                local hover = mx > x and mx < x + hover_w and my > y and my < y + btn_h
+                local active = (btn.category == active_category)
 
-            -- Adjust button width according to text
-            gfx.setfont(1, "Arial", 16)
-            local text_w, text_h = gfx.measurestr(btn.name)
-            local padding = 20
-            local min_w = 120
-            local dynamic_w = math.max(min_w, text_w + padding)
-            local btn_w_dynamic = dynamic_w
+                -- Adjust button width according to text
+                local text_w, text_h = gfx.measurestr(btn.name)
+                local padding = 20
+                local min_w = 120
+                local btn_w_dynamic = math.max(min_w, text_w + padding)
 
-            -- Colors
-            if active then
-                gfx.set(0.2, 0.6, 1.0)
-            elseif hover then
-                gfx.set(0.45, 0.45, 0.55)
+                -- Colors
+                if active then
+                    gfx.set(0.2, 0.6, 1.0)
+                elseif hover then
+                    gfx.set(0.45, 0.45, 0.55)
+                else
+                    gfx.set(0.35, 0.35, 0.35)
+                end
+
+                -- Draw button with adjusted width
+                gfx.roundrect(x, y, btn_w_dynamic, btn_h, 6, 1)
+
+                -- Vertically centered text
+                gfx.x = x + 10
+                gfx.y = y + (btn_h - text_h) / 2
+                gfx.set(1, 1, 1)
+                gfx.drawstr(btn.name)
+
+                -- "add subcategory" control, inline on the right side of this row
+                -- (only while this category is expanded, scoped to it)
+                if btn.expanded then
+                    local plus_x, plus_w = x + btn_w_dynamic + 8, 30
+                    local plus_hover = mx > plus_x and mx < plus_x + plus_w and my > y and my < y + btn_h
+                    gfx.set(plus_hover and 0.4 or 0.3, plus_hover and 0.5 or 0.3, plus_hover and 0.6 or 0.3)
+                    gfx.roundrect(plus_x, y, plus_w, btn_h, 6, 1)
+                    gfx.x, gfx.y = plus_x + 10, y + 8
+                    gfx.set(1, 1, 1)
+                    gfx.drawstr("+")
+
+                    if plus_hover and lmb and not was_lmb then
+                        add_subcategory(btn.category)
+                    end
+                end
+
+                -- Click: select category (shows its content) and toggle its subcategories
+                if hover and lmb and not was_lmb then
+                    select_category(btn)
+                end
             else
-                gfx.set(0.35, 0.35, 0.35)
-            end
+                -- root "add category" row (the only remaining row of this kind)
+                local hover = mx > x and mx < x + 50 and my > y and my < y + btn_h
+                gfx.set(hover and 0.4 or 0.3, hover and 0.5 or 0.3, hover and 0.6 or 0.3)
+                gfx.roundrect(x, y, 50, btn_h, 6, 1)
+                gfx.x, gfx.y = x + 20, y + 8
+                gfx.set(1, 1, 1)
+                gfx.drawstr("+")
 
-            -- Draw button with adjusted width
-            gfx.roundrect(x, y, btn_w_dynamic, btn_h, 6, 1)
-
-            -- Vertically centered text
-            gfx.x = x + 10
-            gfx.y = y + (btn_h - text_h) / 2
-            gfx.set(1, 1, 1)
-            gfx.drawstr(btn.name)
-
-            -- Click
-            if hover and lmb and not was_lmb then
-                if active_category ~= btn.category then
-                    active_category = btn.category
-                    scroll_y = 0 
-                    active_content_index = 0
-                    active_menu_index = i
+                if hover and lmb and not was_lmb then
+                    add_subcategory(row.parent)
                 end
             end
         end
-        y = y + btn_h + 10
+        y = y + btn_h + spacing
     end
 
-
-    ------------------------------------------------------------
-    -- Button: Add Menu
-    ------------------------------------------------------------
-    local function add_menu_button()
-        local ok, ret = reaper.GetUserInputs("New Menu Category", 2, "Display name:,Category ID:", "")
-        if not ok then return end
-        local name, category = ret:match("([^,]+),([^,]+)")
-        if not (name and category) then return end
-
-        table.insert(menu_buttons, { name = name, category = category })
-        content_buttons[category] = {}
-        save_to_ini(config_path, menu_buttons, content_buttons)
+    -- Keep active_menu_index in sync with the currently selected category
+    -- (indexes the category-only list, matching the arrow-key handlers)
+    local cat_i = 0
+    for _, row in ipairs(rows) do
+        if row.kind == "category" then
+            cat_i = cat_i + 1
+            if row.btn.category == active_category then
+                active_menu_index = cat_i
+                break
+            end
+        end
     end
 
-    ------------------------------------------------------------
-    -- Draw the add button
-    ------------------------------------------------------------
-
-    local hover = mx > x and mx < x + 50 and my > y and my < y + btn_h
-    gfx.set(hover and 0.4 or 0.3, hover and 0.5 or 0.3, hover and 0.6 or 0.3)
-    gfx.roundrect(x, y, 50, btn_h, 6, 1)
-    gfx.x, gfx.y = x + 20, y + 8
-    gfx.set(1, 1, 1)
-    gfx.drawstr("+")
-
-    if hover and lmb and not was_lmb then
-        add_menu_button()
-    end
-    y = y + btn_h + 10
-
-    menu_max_scroll = math.max(0, (#menu_buttons * (btn_h + 10)) - gfx.h + 90)
+    menu_max_scroll = math.max(0, (#rows * (btn_h + spacing)) - gfx.h + 90)
 end
 
 ------------------------------------------------------------
@@ -340,6 +443,7 @@ local function draw_content(mx, my, lmb)
                     active_button = btn
                     active_content_index = i
                     run_action(btn.cmd)
+                    gfx.quit()
                 end
             end
 
@@ -360,17 +464,40 @@ local function draw_content(mx, my, lmb)
     gfx.drawstr("+")
 
     if hover and lmb and not was_lmb then
-        if active_category then
-            local ok, ret = reaper.GetUserInputs("New Action Button", 3, "Name:,Action ID:,Image file (ex: MyIcon.png):", "")
-            if ok then
-                local name, cmd, img = ret:match("([^,]+),([^,]+),([^,]+)")
-                if name and cmd and img then
-                    table.insert(content_buttons[active_category], { name=name, cmd=cmd, image=icon_path .. img })
-                    save_to_ini(config_path, menu_buttons, content_buttons)
+        if not active_category then
+            reaper.ShowMessageBox("No active category.", "Warning", 0)
+        else
+            local choice = gfx.showmenu("Action ID|Track Template")
+
+            if choice == 1 then
+                local ok, ret = reaper.GetUserInputs("New Action Button", 3, "Name:,Action ID:,Image file (ex: MyIcon.png):", "")
+                if ok then
+                    local name, cmd, img = ret:match("([^,]+),([^,]+),([^,]+)")
+                    if name and cmd and img then
+                        table.insert(content_buttons[active_category], { name=name, cmd=cmd, image=icon_path .. img })
+                        save_to_ini(config_path, menu_buttons, content_buttons)
+                    end
+                end
+
+            elseif choice == 2 then
+                local templates = list_track_templates()
+                if #templates == 0 then
+                    reaper.ShowMessageBox("No .RTrackTemplate files found in " .. track_templates_path, "Warning", 0)
+                else
+                    local t_choice = gfx.showmenu(table.concat(templates, "|"))
+                    if t_choice > 0 then
+                        local template_file = templates[t_choice]
+                        local ok, ret = reaper.GetUserInputs("New Track Template Button", 2, "Name:,Image file (ex: MyIcon.png):", "")
+                        if ok then
+                            local name, img = ret:match("([^,]+),([^,]+)")
+                            if name and img then
+                                table.insert(content_buttons[active_category], { name=name, cmd="TEMPLATE:" .. template_file, image=icon_path .. img })
+                                save_to_ini(config_path, menu_buttons, content_buttons)
+                            end
+                        end
+                    end
                 end
             end
-        else
-            reaper.ShowMessageBox("No active category.", "Warning", 0)
         end
     end
 
@@ -437,16 +564,20 @@ function main()
     -- ↑ up arrow = previous menu
     ------------------------------------------------------------
     if char == 30064 then
-        if #menu_buttons > 0 then
-            active_menu_index = math.max(1, active_menu_index - 1)
-            active_category = menu_buttons[active_menu_index].category
-            active_content_index = 0
-            scroll_y = 0
+        local rows = build_menu_rows()
+        local cats = {}
+        for idx, row in ipairs(rows) do
+            if row.kind == "category" then table.insert(cats, { btn = row.btn, row_index = idx }) end
+        end
+        if #cats > 0 then
+            active_menu_index = math.max(1, math.min(active_menu_index, #cats) - 1)
+            local entry = cats[active_menu_index]
+            select_category(entry.btn, true)
 
             local btn_h, spacing = 35, 10
             local top_visible = menu_scroll_y
             local bottom_visible = menu_scroll_y + gfx.h - 80
-            local btn_y = (active_menu_index - 1) * (btn_h + spacing)
+            local btn_y = (entry.row_index - 1) * (btn_h + spacing)
             if btn_y < top_visible then
                 menu_scroll_y = btn_y
             elseif btn_y + btn_h > bottom_visible then
@@ -460,16 +591,20 @@ function main()
     -- ↓ down arrow = next menu
     ------------------------------------------------------------
     if char == 1685026670 then
-        if #menu_buttons > 0 then
-            active_menu_index = math.min(#menu_buttons, active_menu_index + 1)
-            active_category = menu_buttons[active_menu_index].category
-            active_content_index = 0
-            scroll_y = 0
-            
+        local rows = build_menu_rows()
+        local cats = {}
+        for idx, row in ipairs(rows) do
+            if row.kind == "category" then table.insert(cats, { btn = row.btn, row_index = idx }) end
+        end
+        if #cats > 0 then
+            active_menu_index = math.min(#cats, math.min(active_menu_index, #cats) + 1)
+            local entry = cats[active_menu_index]
+            select_category(entry.btn, true)
+
             local btn_h, spacing = 35, 10
             local top_visible = menu_scroll_y
             local bottom_visible = menu_scroll_y + gfx.h - 80
-            local btn_y = (active_menu_index - 1) * (btn_h + spacing)
+            local btn_y = (entry.row_index - 1) * (btn_h + spacing)
             if btn_y < top_visible then
                 menu_scroll_y = btn_y
             elseif btn_y + btn_h > bottom_visible then
