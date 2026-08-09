@@ -97,6 +97,7 @@ end
 local menu_buttons, content_buttons = parse_ini(config_path)
 
 local active_category = menu_buttons[1] and menu_buttons[1].category or nil
+if menu_buttons[1] then menu_buttons[1].expanded = true end
 local active_menu_index = 1
 local active_content_index = 0
 
