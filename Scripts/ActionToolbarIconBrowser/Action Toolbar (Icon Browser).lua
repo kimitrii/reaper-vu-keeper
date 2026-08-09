@@ -209,8 +209,10 @@ local function list_track_templates()
 end
 
 local function insert_track_template(template_file)
-    local tr = reaper.GetTrack(0, reaper.CountTracks(0) - 1)
-    if tr then reaper.SetOnlyTrackSelected(tr) end
+    if reaper.CountSelectedTracks(0) == 0 then
+        local tr = reaper.GetTrack(0, reaper.CountTracks(0) - 1)
+        if tr then reaper.SetOnlyTrackSelected(tr) end
+    end
     reaper.Main_openProject(track_templates_path .. template_file)
 end
 
@@ -218,14 +220,17 @@ local function run_action(cmd_id)
     local template_file = cmd_id:match("^TEMPLATE:(.+)$")
     if template_file then
         insert_track_template(template_file)
-        return
+        return true
     end
 
     local command = reaper.NamedCommandLookup(cmd_id)
     if command and command ~= 0 then
+        local state_before = reaper.GetProjectStateChangeCount(0)
         reaper.Main_OnCommand(command, 0)
+        return reaper.GetProjectStateChangeCount(0) ~= state_before
     else
         reaper.ShowMessageBox("Command ID inválido: " .. tostring(cmd_id), "Erro", 0)
+        return false
     end
 end
 
@@ -488,8 +493,9 @@ local function draw_content(mx, my, lmb)
                 if hover and lmb and not was_lmb then
                     active_button = btn
                     active_content_index = i
-                    run_action(btn.cmd)
-                    gfx.quit()
+                    if run_action(btn.cmd) then
+                        gfx.quit()
+                    end
                 end
             end
 
@@ -676,8 +682,8 @@ function main()
         else
             local list = content_buttons[active_category] or {}
             local btn = list[active_content_index]
-            if btn then
-                run_action(btn.cmd)
+            if btn and run_action(btn.cmd) then
+                gfx.quit()
             end
         end
     end
