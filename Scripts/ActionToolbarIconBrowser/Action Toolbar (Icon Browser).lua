@@ -16,12 +16,14 @@ end
 local dock_state = tonumber(reaper.GetExtState(section, "dock_state")) or 0
 gfx.init(script_name, 600, 500, dock_state)
 
-reaper.defer(function()
-    local hwnd = reaper.JS_Window_Find(script_name, true)
-    if hwnd then
-        reaper.JS_Window_SetFocus(hwnd)
-    end
-end)
+if reaper.JS_Window_Find then
+    reaper.defer(function()
+        local hwnd = reaper.JS_Window_Find(script_name, true)
+        if hwnd then
+            reaper.JS_Window_SetFocus(hwnd)
+        end
+    end)
+end
 
 local theme_color = reaper.GetThemeColor("col_main_bg2", 0)
 if theme_color == -1 then theme_color = reaper.GetThemeColor("col_main_bg", 0) end
@@ -78,11 +80,15 @@ local function parse_ini(path)
                         if not category then category = value end
                         table.insert(menu_buttons, { name = key, category = category, parent = parent })
                     else
-                        local cmd, img = value:match("([^,]+),%s*(.+)")
+                        local cmd, img, frames = value:match("([^,]+),%s*([^,]+),%s*(%d+)%s*$")
+                        if not cmd then
+                            cmd, img = value:match("([^,]+),%s*(.+)")
+                        end
                         table.insert(content_buttons[current_section], {
                             name = key,
                             cmd = cmd,
-                            image = icon_path .. img
+                            image = icon_path .. img,
+                            frames = tonumber(frames) or 3
                         })
                     end
                 end
@@ -139,7 +145,7 @@ local function save_to_ini(path, menu_buttons, content_buttons)
         f:write(("[" .. cat .. "]\n"))
         for _, fx in ipairs(list) do
             local img = fx.image:match("([^/\\]+)$") or fx.image
-            f:write(("%s=%s,%s\n"):format(fx.name, fx.cmd, img))
+            f:write(("%s=%s,%s,%d\n"):format(fx.name, fx.cmd, img, fx.frames or 3))
         end
         f:write("\n")
     end
@@ -403,6 +409,46 @@ local function draw_menu(mx, my, lmb)
     menu_max_scroll = math.max(0, (#rows * (btn_h + spacing)) - gfx.h + 90)
 end
 
+local function copy_file(src, dst)
+    local in_f = io.open(src, "rb")
+    if not in_f then return false end
+    local data = in_f:read("*a")
+    in_f:close()
+
+    local out_f = io.open(dst, "wb")
+    if not out_f then return false end
+    out_f:write(data)
+    out_f:close()
+    return true
+end
+
+local function import_icon(src_path)
+    if not reaper.file_exists(icon_path) then
+        reaper.RecursiveCreateDirectory(icon_path, 0)
+    end
+
+    local basename = src_path:match("([^/\\]+)$")
+    if not basename then return nil end
+
+    local dest = icon_path .. basename
+    if src_path == dest then return basename end
+
+    if reaper.file_exists(dest) then
+        local stem, ext = basename:match("^(.-)(%.[^.]*)$")
+        stem = stem or basename
+        ext = ext or ""
+        local i = 1
+        repeat
+            basename = ("%s_%d%s"):format(stem, i, ext)
+            dest = icon_path .. basename
+            i = i + 1
+        until not reaper.file_exists(dest)
+    end
+
+    if not copy_file(src_path, dest) then return nil end
+    return basename
+end
+
 local function add_content_button()
     if not active_category then
         reaper.ShowMessageBox("No active category.", "Warning", 0)
@@ -412,13 +458,19 @@ local function add_content_button()
     local choice = gfx.showmenu("Action ID|Track Template")
 
     if choice == 1 then
-        local ok, ret = reaper.GetUserInputs("New Action Button", 3, "Name:,Action ID:,Image file (ex: MyIcon.png):", "")
-        if ok then
-            local name, cmd, img = ret:match("([^,]+),([^,]+),([^,]+)")
-            if name and cmd and img then
-                table.insert(content_buttons[active_category], { name=name, cmd=cmd, image=icon_path .. img })
-                save_to_ini(config_path, menu_buttons, content_buttons)
-            end
+        local ok, ret = reaper.GetUserInputs("New Action Button", 3, "Name:,Action ID:,Icon type (1=Single, 3=3-State):", ",,1")
+        if not ok then return end
+        local name, cmd, frames_str = ret:match("([^,]*),([^,]*),([^,]*)")
+        if not (name and cmd) or name == "" or cmd == "" then return end
+        local frames = tonumber(frames_str) == 3 and 3 or 1
+
+        local ok2, img_path = reaper.GetUserFileNameForRead("", "Select icon image for " .. name, "png")
+        if not ok2 or img_path == "" then return end
+
+        local basename = import_icon(img_path)
+        if basename then
+            table.insert(content_buttons[active_category], { name=name, cmd=cmd, image=icon_path .. basename, frames=frames })
+            save_to_ini(config_path, menu_buttons, content_buttons)
         end
 
     elseif choice == 2 then
@@ -429,12 +481,19 @@ local function add_content_button()
             local t_choice = gfx.showmenu(table.concat(templates, "|"))
             if t_choice > 0 then
                 local template_file = templates[t_choice]
-                local ok, ret = reaper.GetUserInputs("New Track Template Button", 2, "Name:,Image file (ex: MyIcon.png):", "")
+                local ok, ret = reaper.GetUserInputs("New Track Template Button", 2, "Name:,Icon type (1=Single, 3=3-State):", ",1")
                 if ok then
-                    local name, img = ret:match("([^,]+),([^,]+)")
-                    if name and img then
-                        table.insert(content_buttons[active_category], { name=name, cmd="TEMPLATE:" .. template_file, image=icon_path .. img })
-                        save_to_ini(config_path, menu_buttons, content_buttons)
+                    local name, frames_str = ret:match("([^,]*),([^,]*)")
+                    if name and name ~= "" then
+                        local frames = tonumber(frames_str) == 3 and 3 or 1
+                        local ok2, img_path = reaper.GetUserFileNameForRead("", "Select icon image for " .. name, "png")
+                        if ok2 and img_path ~= "" then
+                            local basename = import_icon(img_path)
+                            if basename then
+                                table.insert(content_buttons[active_category], { name=name, cmd="TEMPLATE:" .. template_file, image=icon_path .. basename, frames=frames })
+                                save_to_ini(config_path, menu_buttons, content_buttons)
+                            end
+                        end
                     end
                 end
             end
@@ -458,7 +517,8 @@ local function draw_content(mx, my, lmb)
         local img_data = loaded_images[btn.image]
         if not img_data then load_image(btn.image) img_data = loaded_images[btn.image] end
         if img_data then
-            local img_id, iw, ih = img_data.id, img_data.w / 3, img_data.h
+            local frames = btn.frames or 3
+            local img_id, iw, ih = img_data.id, img_data.w / frames, img_data.h
             local frame_w, frame_h = iw, ih
 
             if x + frame_w > gfx.w - 20 then
@@ -481,7 +541,7 @@ local function draw_content(mx, my, lmb)
                 local selected = (i == active_content_index)
 
                 local active = (active_button == btn)
-                local src_x = active and frame_w * 2 or (hover and frame_w or 0)
+                local src_x = frames >= 3 and (active and frame_w * 2 or (hover and frame_w or 0)) or 0
 
                 gfx.blit(img_id, 1, 0, src_x, 0, frame_w, frame_h, x, y + offset_y, frame_w, frame_h)
 
@@ -572,7 +632,7 @@ local function reveal_content_item(list, index)
     for i = 1, index - 1 do
         local btn_img = loaded_images[list[i].image]
         if btn_img then
-            local iw2, ih2 = btn_img.w / 3, btn_img.h
+            local iw2, ih2 = btn_img.w / (list[i].frames or 3), btn_img.h
             if x + iw2 > gfx.w - 20 then
                 x = x_start
                 y = y + ih2 + spacing_y
