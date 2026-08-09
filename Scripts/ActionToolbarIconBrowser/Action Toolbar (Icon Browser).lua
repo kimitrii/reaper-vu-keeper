@@ -274,7 +274,8 @@ local function select_category(btn, force_open)
 end
 
 local function add_subcategory(parent_category)
-    local ok, name = reaper.GetUserInputs("New Subcategory", 1, "Display name:", "")
+    local title = parent_category and "New Subcategory" or "New Category"
+    local ok, name = reaper.GetUserInputs(title, 1, "Display name:", "")
     if not ok or name == "" then return end
     invalidate_menu_rows()
 
