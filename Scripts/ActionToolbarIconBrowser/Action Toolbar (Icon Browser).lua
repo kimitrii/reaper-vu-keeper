@@ -13,8 +13,10 @@ if reaper.JS_Window_Find then
     end
 end
 
+gfx.ext_retina = 1
 local dock_state = tonumber(reaper.GetExtState(section, "dock_state")) or 0
 gfx.init(script_name, 600, 500, dock_state)
+local scale =  (gfx.ext_retina and gfx.ext_retina > 0) and gfx.ext_retina or 1
 
 if reaper.JS_Window_Find then
     reaper.defer(function()
@@ -38,7 +40,7 @@ end
 local bg_r, bg_g, bg_b = colorToRGB(theme_color)
 local bg_color_native = reaper.ColorToNative(bg_r * 255, bg_g * 255, bg_b * 255)
 
-gfx.setfont(1, "Arial", 16)
+gfx.setfont(1, "Arial", math.floor(16 * scale + 0.5))
 local was_lmb = false
 local active_button = nil
 
@@ -107,8 +109,8 @@ if menu_buttons[1] then menu_buttons[1].expanded = true end
 local active_menu_index = 1
 local active_content_index = 0
 
-local content_x_start = 180
-local content_y_start = 2
+local content_x_start = 180 * scale
+local content_y_start = 2 * scale
 
 local function truncate_text(text, max_w)
     if gfx.measurestr(text) <= max_w then return text end
@@ -297,14 +299,14 @@ local function add_subcategory(parent_category)
 end
 
 local function draw_menu(mx, my, lmb)
-    local x_base, indent_w, btn_h, spacing = 0, 20, 35, 10
-    local plus_w, plus_gap = 30, 8
+    local x_base, indent_w, btn_h, spacing = 0, 20 * scale, 35 * scale, 10 * scale
+    local plus_w, plus_gap = 30 * scale, 8 * scale
     local plus_reserve = plus_w + plus_gap
     local y = 0 - menu_scroll_y
-    local visible_limit = gfx.h + 50
+    local visible_limit = gfx.h + 50 * scale
 
-    local sidebar_right_gap = 12
-    local min_readable_w = 50
+    local sidebar_right_gap = 12 * scale
+    local min_readable_w = 50 * scale
     local sidebar_right_limit = content_x_start - sidebar_right_gap
     local max_depth = math.max(0, math.floor((sidebar_right_limit - min_readable_w - x_base - plus_reserve) / indent_w))
 
@@ -321,8 +323,8 @@ local function draw_menu(mx, my, lmb)
                 local active = (btn.category == active_category) and not menu_focus_add and not menu_focus_subadd
 
                 local text_w, text_h = gfx.measurestr(btn.name)
-                local padding = 20
-                local min_w = 120
+                local padding = 20 * scale
+                local min_w = 120 * scale
                 local available_w = math.max(min_readable_w, sidebar_right_limit - box_x)
                 local btn_w_dynamic = math.min(math.max(min_w, text_w + padding), available_w)
                 local display_name = btn.name
@@ -345,9 +347,9 @@ local function draw_menu(mx, my, lmb)
                     gfx.set(0.35, 0.35, 0.35)
                 end
 
-                gfx.roundrect(box_x, y, btn_w_dynamic, btn_h, 6, 1)
+                gfx.roundrect(box_x, y, btn_w_dynamic, btn_h, 6 * scale, 1)
 
-                gfx.x = box_x + 10
+                gfx.x = box_x + 10 * scale
                 gfx.y = y + (btn_h - text_h) / 2
                 gfx.set(1, 1, 1)
                 gfx.drawstr(display_name)
@@ -360,8 +362,8 @@ local function draw_menu(mx, my, lmb)
                     else
                         gfx.set(plus_hover and 0.4 or 0.3, plus_hover and 0.5 or 0.3, plus_hover and 0.6 or 0.3)
                     end
-                    gfx.roundrect(plus_x, y, plus_w, btn_h, 6, 1)
-                    gfx.x, gfx.y = plus_x + 10, y + 8
+                    gfx.roundrect(plus_x, y, plus_w, btn_h, 6 * scale, 1)
+                    gfx.x, gfx.y = plus_x + 10 * scale, y + 8 * scale
                     gfx.set(1, 1, 1)
                     gfx.drawstr("+")
 
@@ -374,14 +376,14 @@ local function draw_menu(mx, my, lmb)
                     select_category(btn)
                 end
             else
-                local hover = mx > box_x and mx < box_x + 50 and my > y and my < y + btn_h
+                local hover = mx > box_x and mx < box_x + 50 * scale and my > y and my < y + btn_h
                 if menu_focus_add then
                     gfx.set(0.2, 0.6, 1.0)
                 else
                     gfx.set(hover and 0.4 or 0.3, hover and 0.5 or 0.3, hover and 0.6 or 0.3)
                 end
-                gfx.roundrect(box_x, y, 50, btn_h, 6, 1)
-                gfx.x, gfx.y = box_x + 20, y + 8
+                gfx.roundrect(box_x, y, 50 * scale, btn_h, 6 * scale, 1)
+                gfx.x, gfx.y = box_x + 20 * scale, y + 8 * scale
                 gfx.set(1, 1, 1)
                 gfx.drawstr("+")
 
@@ -406,7 +408,7 @@ local function draw_menu(mx, my, lmb)
         end
     end
 
-    menu_max_scroll = math.max(0, (#rows * (btn_h + spacing)) - gfx.h + 90)
+    menu_max_scroll = math.max(0, (#rows * (btn_h + spacing)) - gfx.h + 90 * scale)
 end
 
 local function copy_file(src, dst)
@@ -504,24 +506,24 @@ end
 local function draw_content(mx, my, lmb)
     local x_start = content_x_start
     local y_start = content_y_start - scroll_y
-    local spacing_x, spacing_y = 20, 20
+    local spacing_x, spacing_y = 20 * scale, 20 * scale
     local list = content_buttons[active_category] or {}
 
     local x = x_start
     local y = y_start
     local line_height = 0
     local total_height = 0
-    local visible_limit = gfx.h + 150
+    local visible_limit = gfx.h + 150 * scale
 
     for i, btn in ipairs(list) do
         local img_data = loaded_images[btn.image]
         if not img_data then load_image(btn.image) img_data = loaded_images[btn.image] end
         if img_data then
             local frames = btn.frames or 3
-            local img_id, iw, ih = img_data.id, img_data.w / frames, img_data.h
-            local frame_w, frame_h = iw, ih
+            local img_id, src_w, src_h = img_data.id, img_data.w / frames, img_data.h
+            local frame_w, frame_h = src_w * scale, src_h * scale
 
-            if x + frame_w > gfx.w - 20 then
+            if x + frame_w > gfx.w - 20 * scale then
                 x = x_start
                 total_height = total_height + line_height + spacing_y
                 y = y + line_height + spacing_y
@@ -541,13 +543,13 @@ local function draw_content(mx, my, lmb)
                 local selected = (i == active_content_index)
 
                 local active = (active_button == btn)
-                local src_x = frames >= 3 and (active and frame_w * 2 or (hover and frame_w or 0)) or 0
+                local src_x = frames >= 3 and (active and src_w * 2 or (hover and src_w or 0)) or 0
 
-                gfx.blit(img_id, 1, 0, src_x, 0, frame_w, frame_h, x, y + offset_y, frame_w, frame_h)
+                gfx.blit(img_id, 1, 0, src_x, 0, src_w, src_h, x, y + offset_y, frame_w, frame_h)
 
                 if selected then
                     gfx.set(0.2, 0.6, 1.0, 1)
-                    gfx.rect(x - 2, y + offset_y - 2, frame_w + 4, frame_h + 4, false)
+                    gfx.rect(x - 2 * scale, y + offset_y - 2 * scale, frame_w + 4 * scale, frame_h + 4 * scale, false)
                 end
 
                 if hover and lmb and not was_lmb then
@@ -562,18 +564,18 @@ local function draw_content(mx, my, lmb)
             x = x + frame_w + spacing_x
         end
     end
-    total_height = total_height + line_height + spacing_y + 30
+    total_height = total_height + line_height + spacing_y + 30 * scale
 
     y = y + line_height + spacing_y
 
-    local hover = mx > x_start and mx < x_start + 50 and my > y and my < y + 30
+    local hover = mx > x_start and mx < x_start + 50 * scale and my > y and my < y + 30 * scale
     if content_focus_add then
         gfx.set(0.2, 0.6, 1.0)
     else
         gfx.set(hover and 0.4 or 0.3, hover and 0.5 or 0.3, hover and 0.6 or 0.3)
     end
-    gfx.roundrect(x_start, y, 50, 30, 6, 1)
-    gfx.x, gfx.y = x_start + 20, y + 8
+    gfx.roundrect(x_start, y, 50 * scale, 30 * scale, 6 * scale, 1)
+    gfx.x, gfx.y = x_start + 20 * scale, y + 8 * scale
     gfx.set(1, 1, 1)
     gfx.drawstr("+")
 
@@ -584,14 +586,14 @@ local function draw_content(mx, my, lmb)
     if hovered_icon_name then
         gfx.set(0, 0, 0, 0.75)
         local text_w, text_h = gfx.measurestr(hovered_icon_name)
-        gfx.rect(mx + 12, my + 20, text_w + 10, text_h + 6, true)
+        gfx.rect(mx + 12 * scale, my + 20 * scale, text_w + 10 * scale, text_h + 6 * scale, true)
         gfx.set(1, 1, 1, 1)
-        gfx.x, gfx.y = mx + 17, my + 23
+        gfx.x, gfx.y = mx + 17 * scale, my + 23 * scale
         gfx.drawstr(hovered_icon_name)
     end
     hovered_icon_name = nil
 
-    max_scroll = math.max(0, total_height - (gfx.h - 50))
+    max_scroll = math.max(0, total_height - (gfx.h - 50 * scale))
 end
 
 local function navigate_menu(delta)
@@ -607,14 +609,14 @@ local function navigate_menu(delta)
         menu_focus_add = true
     end
 
-    local btn_h, spacing = 35, 10
+    local btn_h, spacing = 35 * scale, 10 * scale
     local top_visible = menu_scroll_y
-    local bottom_visible = menu_scroll_y + gfx.h - 80
+    local bottom_visible = menu_scroll_y + gfx.h - 80 * scale
     local btn_y = (active_menu_index - 1) * (btn_h + spacing)
     if btn_y < top_visible then
         menu_scroll_y = btn_y
     elseif btn_y + btn_h > bottom_visible then
-        menu_scroll_y = btn_y + btn_h - (gfx.h - 80)
+        menu_scroll_y = btn_y + btn_h - (gfx.h - 80 * scale)
     end
     menu_scroll_y = math.max(0, math.min(menu_scroll_y, menu_max_scroll))
 end
@@ -624,16 +626,16 @@ local function reveal_content_item(list, index)
     local img_data = loaded_images[list[index].image]
     if not img_data then return end
 
-    local ih = img_data.h
-    local spacing_x, spacing_y = 20, 20
+    local ih = img_data.h * scale
+    local spacing_x, spacing_y = 20 * scale, 20 * scale
     local x_start, y_start = content_x_start, content_y_start
 
     local x, y = x_start, y_start
     for i = 1, index - 1 do
         local btn_img = loaded_images[list[i].image]
         if btn_img then
-            local iw2, ih2 = btn_img.w / (list[i].frames or 3), btn_img.h
-            if x + iw2 > gfx.w - 20 then
+            local iw2, ih2 = (btn_img.w / (list[i].frames or 3)) * scale, btn_img.h * scale
+            if x + iw2 > gfx.w - 20 * scale then
                 x = x_start
                 y = y + ih2 + spacing_y
             end
@@ -642,14 +644,14 @@ local function reveal_content_item(list, index)
     end
 
     local top_visible = scroll_y
-    local bottom_visible = scroll_y + gfx.h - 100
+    local bottom_visible = scroll_y + gfx.h - 100 * scale
     local item_top = y
     local item_bottom = y + ih
 
     if item_top < top_visible then
         scroll_y = item_top
     elseif item_bottom > bottom_visible then
-        scroll_y = item_bottom - (gfx.h - 100)
+        scroll_y = item_bottom - (gfx.h - 100 * scale)
     end
 
     scroll_y = math.max(0, math.min(scroll_y, max_scroll))
@@ -662,10 +664,10 @@ function main()
 
     local mw = gfx.mouse_wheel
     if mw ~= 0 then
-        if mx < 160 then
-            menu_scroll_y = math.max(0, math.min(menu_scroll_y - mw / 120 * 30, menu_max_scroll))
+        if mx < 160 * scale then
+            menu_scroll_y = math.max(0, math.min(menu_scroll_y - mw / 120 * 30 * scale, menu_max_scroll))
         else
-            scroll_y = math.max(0, math.min(scroll_y - mw / 120 * 30, max_scroll))
+            scroll_y = math.max(0, math.min(scroll_y - mw / 120 * 30 * scale, max_scroll))
         end
     end
     gfx.mouse_wheel = 0
